@@ -1,0 +1,31 @@
+:host {
+  display: block;
+  font-family: system-ui, sans-serif;
+}
+
+.shell-header {
+  padding: 1rem;
+  border-bottom: 1px solid #ddd;
+
+  h1 {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+}
+
+.shell-main {
+  padding: 1rem;
+}
+
+// Status is spelled out in text; colour only reinforces it.
+.api-status__value {
+  font-weight: 600;
+
+  &[data-status='online'] {
+    color: #1a7f37;
+  }
+
+  &[data-status='offline'] {
+    color: #b42318;
+  }
+}

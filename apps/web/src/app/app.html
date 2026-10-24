@@ -1,0 +1,12 @@
+<header class="shell-header">
+  <h1>DeskQuest</h1>
+</header>
+<main class="shell-main">
+  <p class="api-status" role="status">
+    API:
+    <span class="api-status__value" [attr.data-status]="apiStatus()"
+      >{{ apiStatus() }}</span
+    >
+  </p>
+  <router-outlet />
+</main>

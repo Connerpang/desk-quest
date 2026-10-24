@@ -1,0 +1,11 @@
+#!/bin/sh
+# Blocks commits that contain secrets (plan D14: the repo is public).
+# Installed by `pnpm install` (the root `prepare` script sets
+# core.hooksPath). CI scans full history as well.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed, so staged changes can't be"
+  echo "scanned for secrets. Install it (macOS: brew install gitleaks;"
+  echo "others: https://github.com/gitleaks/gitleaks#installing) and retry."
+  exit 1
+fi
+exec gitleaks git --pre-commit --staged --redact --no-banner

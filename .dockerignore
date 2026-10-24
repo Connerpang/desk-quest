@@ -1,0 +1,17 @@
+# Keep secrets, host-built artefacts and caches out of the build context.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/node_modules
+dist
+coverage
+tmp
+.nx
+.angular
+.git
+.claude
+.vscode
+test-results
+playwright-report

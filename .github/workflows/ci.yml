@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Weekly run catches newly published advisories on an unchanged tree.
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NX_NO_CLOUD: true
+  NX_DAEMON: false
+
+# Third-party actions are pinned to commit SHAs (tag in the comment).
+jobs:
+  checks:
+    name: Lint, test, typecheck, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm nx run-many -t lint test typecheck build --output-style=static
+      - name: Personal-data column check (data-inventory §2.1)
+        run: pnpm db:check-personal-data
+
+  integration:
+    name: Integration tests (Testcontainers)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Includes the role-separation suite: app_runtime owns nothing and
+      # has no BYPASSRLS (plan §5).
+      - run: pnpm test:integration
+
+  e2e:
+    name: E2E smoke (Docker Compose stack)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create .env with throwaway passwords
+        run: |
+          cp .env.example .env
+          for name in POSTGRES_SUPERUSER_PASSWORD APP_MIGRATOR_PASSWORD APP_RUNTIME_PASSWORD; do
+            value="$(openssl rand -hex 24)"
+            echo "::add-mask::$value"
+            sed -i "s|^$name=.*|$name=$value|" .env
+            printf -v "$name" '%s' "$value"
+          done
+          sed -i "s|^MIGRATOR_DATABASE_URL=.*|MIGRATOR_DATABASE_URL=postgres://app_migrator:$APP_MIGRATOR_PASSWORD@localhost:5432/deskquest|" .env
+          sed -i "s|^DATABASE_URL=.*|DATABASE_URL=postgres://app_runtime:$APP_RUNTIME_PASSWORD@localhost:5432/deskquest|" .env
+      - run: docker compose up -d --build --wait
+      - name: Role check against the Compose database
+        run: pnpm db:check-roles
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Playwright smoke test
+        # The stack is already up, so skip the dev-server dependency.
+        run: pnpm nx e2e web-e2e --exclude-task-dependencies --output-style=static
+        env:
+          BASE_URL: http://127.0.0.1:8080
+      - name: Compose logs
+        if: failure()
+        run: docker compose logs --no-color
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: playwright-report
+          path: dist/.playwright/apps/web-e2e
+          retention-days: 7
+      - if: always()
+        run: docker compose down -v
+
+  security:
+    name: Secrets scan and dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # gitleaks scans every commit, not just the tip
+      - name: gitleaks (full history)
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --exit-code 1 .
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Audit production dependencies (blocking)
+        run: pnpm audit --prod --audit-level=high
+      - name: Audit all dependencies (advisory only)
+        continue-on-error: true
+        run: pnpm audit --audit-level=high

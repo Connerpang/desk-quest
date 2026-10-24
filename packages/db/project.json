@@ -1,0 +1,51 @@
+{
+  "name": "db",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/db/src",
+  "projectType": "library",
+  "tags": ["scope:api"],
+  "targets": {
+    "db-generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "drizzle-kit generate",
+        "cwd": "packages/db"
+      }
+    },
+    "migrate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/scripts/migrate.ts",
+        "cwd": "packages/db"
+      }
+    },
+    "seed": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/scripts/seed.ts",
+        "cwd": "packages/db"
+      }
+    },
+    "check-roles": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/scripts/check-roles.ts",
+        "cwd": "packages/db"
+      }
+    },
+    "integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run --config vitest.integration.config.mts",
+        "cwd": "packages/db"
+      }
+    },
+    "check-personal-data": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/scripts/check-personal-data.ts",
+        "cwd": "packages/db"
+      }
+    }
+  }
+}

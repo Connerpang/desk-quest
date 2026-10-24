@@ -1,0 +1,98 @@
+# Production-shaped stack. `docker compose up` also merges
+# docker-compose.override.yml (dev: published ports, Mailpit). For a server,
+# use only this file: `docker compose -f docker-compose.yml up -d`.
+name: deskquest
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+
+x-api-build: &api-build
+  context: .
+  dockerfile: deployment/docker/Dockerfile
+  target: api
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      # Superuser for bootstrap only; the app never connects with it.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
+      POSTGRES_DB: deskquest
+      APP_MIGRATOR_PASSWORD: ${APP_MIGRATOR_PASSWORD:?set APP_MIGRATOR_PASSWORD in .env}
+      APP_RUNTIME_PASSWORD: ${APP_RUNTIME_PASSWORD:?set APP_RUNTIME_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deployment/compose/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d deskquest']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: applies migrations as app_migrator, then exits.
+  migrate:
+    <<: *hardening
+    build: *api-build
+    image: deskquest-api:local
+    command: ['node', 'migrate.js']
+    environment:
+      MIGRATOR_DATABASE_URL: postgres://app_migrator:${APP_MIGRATOR_PASSWORD}@postgres:5432/deskquest
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *hardening
+    build: *api-build
+    image: deskquest-api:local
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://app_runtime:${APP_RUNTIME_PASSWORD}@postgres:5432/deskquest
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/v1/health/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  web:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: deployment/docker/Dockerfile
+      target: web
+    image: deskquest-web:local
+    restart: unless-stopped
+    tmpfs: [/tmp]
+    ports:
+      # Loopback by default; put a TLS reverse proxy in front for real use.
+      - '${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:

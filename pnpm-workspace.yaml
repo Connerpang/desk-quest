@@ -1,0 +1,34 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm blocks dependency install scripts by default; only these are allowed to run.
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  esbuild: true
+  nx: true
+  unrs-resolver: true
+  lmdb: true
+  msgpackr-extract: true
+  '@nestjs/core': false
+  # Optional native extras pulled in by testcontainers; not needed.
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
+
+# Security overrides. Remove each once upstream ships the fix (check with
+# `pnpm audit`). Scoped to the dependent that pins the vulnerable version.
+overrides:
+  # @nestjs/platform-fastify 11.2.x pins fastify 5.11.3 (GHSA advisories
+  # fixed in 5.12.2).
+  '@nestjs/platform-fastify>fastify': ^5.12.7
+  # @angular/build 22.2.x pins vite 8.3.0 (fixed in 8.3.3).
+  '@angular/build>vite': ^8.3.5
+  # Optional peer of @nestjs/core that pnpm installs anyway. The API uses
+  # Fastify; Express (with body-parser and multer) must not ship.
+  '@nestjs/platform-express': '-'
+  # Dev tooling only (Nx, webpack-dev-server); patch releases.
+  'nx>undici': ^7.29.1
+  'body-parser@1': ^1.20.9
+  'body-parser@2': ^2.4.0
